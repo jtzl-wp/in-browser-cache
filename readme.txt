@@ -2,7 +2,7 @@
 Contributors: jtzl
 Tags: cache, performance, in-browser-cache, browser cache, client-side cache
 Requires at least: 6.8
-Tested up to: 6.8
+Tested up to: 6.8.2
 Stable tag: 2.0.0
 Requires PHP: 8.1
 License: GPLv2 or later

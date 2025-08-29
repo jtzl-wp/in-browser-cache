@@ -3,7 +3,7 @@
  * Plugin Name:       In-Browser Cache
  * Description:       An advanced caching plugin using the power of Service Workers.
  * Version:           2.0.0
- * Requires at least: 6.8.2
+ * Requires at least: 6.8
  * Requires PHP:      8.1
  * Author:            JT G.
  * License:           GPLv2 or later
