@@ -23,127 +23,150 @@ if ( ! defined( 'ABSPATH' ) ) {
 class JTZL_SW_DB {
 
 	/**
-	 * Current database schema version.
+	 * Plugin version to database migration mapping.
 	 *
-	 * @since 0.5.0
+	 * Maps plugin versions to their required database schema changes.
+	 * This ensures migrations run based on actual plugin updates.
+	 *
+	 * Note: Pre-1.0.0 migrations (0.1.0, 0.5.0, 0.6.0) have been removed
+	 * as those versions were never publicly released. Fresh installations
+	 * automatically get the complete database schema via create_initial_tables().
+	 *
+	 * @since 1.5.0
 	 */
-	const DB_VERSION = 2;
+	const VERSION_MIGRATIONS = array(
+		'1.5.0'      => array( 'create_cdn_error_log_table' ),
+		'2.0.0-rc.5' => array( 'add_cdn_metrics_columns' ),
+	);
+
 	/**
-	 * Run database migrations if needed.
+	 * Run database migrations based on plugin version changes.
 	 *
-	 * This method checks the current database version and runs any necessary migrations
-	 * to bring the schema up to the current version.
+	 * This method compares the last known plugin version with the current version
+	 * and runs any necessary migrations to bring the database schema up to date.
 	 *
-	 * @since 0.5.0
+	 * @since 1.5.0
 	 *
 	 * @return bool True if migrations completed successfully, false otherwise.
 	 */
 	public static function maybe_migrate() {
-		$current_db_version = get_option( 'jtzl_sw_db_version', 0 );
+		$current_plugin_version = JTZL_SW_VERSION;
+		$last_migrated_version  = get_option( 'jtzl_sw_plugin_version', '0.0.0' );
 
-		if ( $current_db_version < self::DB_VERSION ) {
-			// Run migrations in sequence.
-			for ( $version = $current_db_version + 1; $version <= self::DB_VERSION; $version++ ) {
-				$migration_method = 'migrate_to_version_' . $version;
+		// Skip if already up to date.
+		if ( version_compare( $last_migrated_version, $current_plugin_version, '>=' ) ) {
+			return true;
+		}
+
+		// For fresh installations (pre-1.0.0), create all tables and mark as current version.
+		if ( version_compare( $last_migrated_version, '1.0.0', '<' ) ) {
+			$result = self::create_initial_tables();
+			if ( ! $result ) {
+				error_log( 'JTZL SW: Failed to create initial tables during fresh installation' );
+				return false;
+			}
+
+			// Mark as current version after successful table creation.
+			self::update_plugin_version( $current_plugin_version );
+			return true;
+		}
+
+		// Get migrations needed between versions for existing installations.
+		$needed_migrations = self::get_migrations_between_versions( $last_migrated_version, $current_plugin_version );
+
+		if ( empty( $needed_migrations ) ) {
+			// Update version even if no migrations needed.
+			self::update_plugin_version( $current_plugin_version );
+			return true;
+		}
+
+		// Run migrations in chronological order.
+		foreach ( $needed_migrations as $version => $migrations ) {
+			foreach ( $migrations as $migration ) {
+				$migration_method = 'migrate_' . $migration;
 				if ( method_exists( __CLASS__, $migration_method ) ) {
 					$result = call_user_func( array( __CLASS__, $migration_method ) );
 					if ( ! $result ) {
+						// Log the failed migration for debugging.
+						error_log( sprintf( 'JTZL SW: Migration failed: %s (method: %s) for version %s', $migration, $migration_method, $version ) );
 						return false;
 					}
+					// Log successful migration for debugging.
+					error_log( sprintf( 'JTZL SW: Migration successful: %s (method: %s) for version %s', $migration, $migration_method, $version ) );
+				} else {
+					// List available methods for debugging.
+					$available_methods = array_filter(
+						get_class_methods( __CLASS__ ),
+						function ( $method ) {
+							return strpos( $method, 'migrate_' ) === 0;
+						}
+					);
+					error_log(
+						sprintf(
+							'JTZL SW: Migration method not found: %s for version %s. Available migration methods: %s',
+							$migration_method,
+							$version,
+							implode( ', ', $available_methods )
+						)
+					);
+					return false;
 				}
 			}
-
-			// Update database version.
-			update_option( 'jtzl_sw_db_version', self::DB_VERSION );
 		}
+
+		// Update to current version after successful migrations.
+		self::update_plugin_version( $current_plugin_version );
 
 		return true;
 	}
 
 	/**
-	 * Migration to version 1 - Create initial tables.
+	 * Get migrations needed between two plugin versions.
 	 *
-	 * @since 0.5.0
+	 * @since 1.5.0
 	 *
-	 * @return bool True if migration successful, false otherwise.
+	 * @param string $from_version Starting version.
+	 * @param string $to_version   Target version.
+	 * @return array Migrations needed, keyed by version.
 	 */
-	private static function migrate_to_version_1() {
-		return self::create_initial_tables();
+	private static function get_migrations_between_versions( $from_version, $to_version ) {
+		$needed_migrations = array();
+
+		foreach ( self::VERSION_MIGRATIONS as $version => $migrations ) {
+			// Include migration if it's newer than from_version and <= to_version.
+			if ( version_compare( $version, $from_version, '>' ) &&
+				version_compare( $version, $to_version, '<=' ) ) {
+				$needed_migrations[ $version ] = $migrations;
+			}
+		}
+
+		// Sort by version to ensure proper order.
+		uksort( $needed_migrations, 'version_compare' );
+
+		return $needed_migrations;
 	}
 
 	/**
-	 * Migration to version 2 - Add hit_count column and constraints.
+	 * Update the stored plugin version after successful migration.
 	 *
-	 * @since 0.5.0
+	 * @since 1.5.0
 	 *
-	 * @return bool True if migration successful, false otherwise.
+	 * @param string $version Plugin version.
+	 * @return void
 	 */
-	private static function migrate_to_version_2() {
-		global $wpdb;
-		$assets_table = $wpdb->prefix . 'jtzl_sw_cached_assets';
+	private static function update_plugin_version( $version ) {
+		update_option( 'jtzl_sw_plugin_version', $version, false );
 
-		// Check if hit_count column already exists.
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- schema inspection during migration is safe and uncached
-		$column_exists = $wpdb->get_results(
-			$wpdb->prepare(
-				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				"SHOW COLUMNS FROM `{$assets_table}` LIKE %s",
-				'hit_count'
-			)
-		);
-
-		if ( empty( $column_exists ) ) {
-			// Add hit_count column with default value 0.
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-			$result = $wpdb->query( "ALTER TABLE `{$assets_table}` ADD COLUMN `hit_count` int(11) NOT NULL DEFAULT 0" );
-			if ( false === $result ) {
-				return false;
-			}
-		}
-
-		// Add index on hit_count column for efficient sorting.
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- schema inspection
-		$index_exists = $wpdb->get_results(
-			$wpdb->prepare(
-				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				"SHOW INDEX FROM `{$assets_table}` WHERE Key_name = %s",
-				'hit_count_idx'
-			)
-		);
-
-		if ( empty( $index_exists ) ) {
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-			$result = $wpdb->query( "ALTER TABLE `{$assets_table}` ADD INDEX `hit_count_idx` (`hit_count`)" );
-			if ( false === $result ) {
-				return false;
-			}
-		}
-
-		// Ensure unique constraint on asset_url exists (it should from initial creation).
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- schema inspection
-		$unique_exists = $wpdb->get_results(
-			$wpdb->prepare(
-				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				"SHOW INDEX FROM `{$assets_table}` WHERE Key_name = %s AND Non_unique = 0",
-				'asset_url_key'
-			)
-		);
-
-		if ( empty( $unique_exists ) ) {
-			// Drop existing non-unique index if it exists.
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-			$wpdb->query( "ALTER TABLE `{$assets_table}` DROP INDEX IF EXISTS `asset_url_key`" );
-
-			// Add unique constraint.
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-			$result = $wpdb->query( "ALTER TABLE `{$assets_table}` ADD UNIQUE KEY `asset_url_key` (`asset_url`(191))" );
-			if ( false === $result ) {
-				return false;
-			}
-		}
-
-		return true;
+		// Also update legacy DB version for backwards compatibility.
+		// Set to 4 to maintain compatibility with existing installations that had the full migration history.
+		update_option( 'jtzl_sw_db_version', 4 );
 	}
+
+
+
+
+
+
 
 	/**
 	 * Create the database table for caching metrics.
@@ -167,10 +190,10 @@ class JTZL_SW_DB {
 	 *
 	 * @return bool True if tables created successfully, false otherwise.
 	 */
-	private static function create_initial_tables() {
+	public static function create_initial_tables() {
 		global $wpdb;
-		$metrics_table   = $wpdb->prefix . 'jtzl_sw_cache_metrics';
-		$assets_table    = $wpdb->prefix . 'jtzl_sw_cached_assets';
+		$metrics_table   = esc_sql( $wpdb->prefix . 'jtzl_sw_cache_metrics' );
+		$assets_table    = esc_sql( $wpdb->prefix . 'jtzl_sw_cached_assets' );
 		$charset_collate = $wpdb->get_charset_collate();
 
 		$sql_metrics = "CREATE TABLE $metrics_table (
@@ -179,6 +202,8 @@ class JTZL_SW_DB {
 			hits int(11) NOT NULL DEFAULT 0,
 			misses int(11) NOT NULL DEFAULT 0,
 			bytes_saved bigint(20) NOT NULL DEFAULT 0,
+			cdn_hits int(11) NOT NULL DEFAULT 0,
+			cdn_misses int(11) NOT NULL DEFAULT 0,
 			PRIMARY KEY  (id),
 			UNIQUE KEY metric_date (metric_date)
 		) $charset_collate;";
@@ -188,9 +213,11 @@ class JTZL_SW_DB {
 			asset_url varchar(2048) NOT NULL,
 			asset_type varchar(20) NOT NULL,
 			asset_size int(11) NOT NULL,
+			hit_count int(11) NOT NULL DEFAULT 0,
 			last_accessed datetime NOT NULL,
 			PRIMARY KEY  (id),
-			UNIQUE KEY asset_url_key (asset_url(191))
+			UNIQUE KEY asset_url_key (asset_url(191)),
+			KEY hit_count_idx (hit_count)
 		) $charset_collate;";
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -199,8 +226,8 @@ class JTZL_SW_DB {
 		$result_assets  = dbDelta( $sql_assets );
 
 		// Verify tables were created.
-		$metrics_exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $metrics_table ) );
-		$assets_exists  = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $assets_table ) );
+		$metrics_exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->prefix . 'jtzl_sw_cache_metrics' ) );
+		$assets_exists  = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->prefix . 'jtzl_sw_cached_assets' ) );
 
 		// Verify tables were created but don't log for production.
 
@@ -219,7 +246,7 @@ class JTZL_SW_DB {
 	 *
 	 * @since 0.1.0
 	 *
-	 * @return bool True if both tables exist, false otherwise.
+	 * @return bool True if all required tables exist, false otherwise.
 	 */
 	public static function table_exists() {
 		global $wpdb;
@@ -315,7 +342,7 @@ class JTZL_SW_DB {
 		// Ensure tables exist and are up to date.
 		self::ensure_table_exists();
 
-		$assets_table = $wpdb->prefix . 'jtzl_sw_cached_assets';
+		$assets_table = esc_sql( $wpdb->prefix . 'jtzl_sw_cached_assets' );
 
 		// Sanitize inputs.
 		$asset_url     = esc_url_raw( $asset_url );
@@ -324,7 +351,29 @@ class JTZL_SW_DB {
 		$last_accessed = sanitize_text_field( $last_accessed );
 		$hit_count     = absint( $hit_count );
 
+		// Business logic validation.
 		if ( empty( $asset_url ) ) {
+			return false;
+		}
+
+		// Validate asset size (max 100MB for web assets).
+		if ( $asset_size > 104857600 ) { // 100MB in bytes.
+			return false;
+		}
+
+		// Validate hit count (max 10,000 hits per single operation).
+		if ( $hit_count > 10000 ) {
+			return false;
+		}
+
+		// Validate asset type against allowed types.
+		$allowed_types = array( 'js', 'css', 'image', 'font', 'html', 'json', 'xml', 'other' );
+		if ( ! in_array( $asset_type, $allowed_types, true ) ) {
+			$asset_type = 'other';
+		}
+
+		// Validate timestamp format.
+		if ( ! preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $last_accessed ) ) {
 			return false;
 		}
 
@@ -380,7 +429,7 @@ class JTZL_SW_DB {
 		// Ensure tables exist and are up to date.
 		self::ensure_table_exists();
 
-		$assets_table = $wpdb->prefix . 'jtzl_sw_cached_assets';
+		$assets_table = esc_sql( $wpdb->prefix . 'jtzl_sw_cached_assets' );
 		$limit        = absint( $limit );
 
 		if ( $limit <= 0 ) {
@@ -417,6 +466,62 @@ class JTZL_SW_DB {
 	}
 	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
+
+
+	/**
+	 * Get CDN metrics for a date range.
+	 *
+	 * This method retrieves CDN metrics from the existing columns in the metrics table.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $start_date Start date in Y-m-d format (optional).
+	 * @param string $end_date   End date in Y-m-d format (optional).
+	 * @return array Array of CDN metrics records.
+	 */
+	public static function get_cdn_metrics( $start_date = null, $end_date = null ) {
+		global $wpdb;
+
+		// Ensure tables exist and are up to date.
+		self::ensure_table_exists();
+
+		$metrics_table = esc_sql( $wpdb->prefix . 'jtzl_sw_cache_metrics' );
+
+		$where_conditions = array();
+		$prepare_values   = array();
+
+		if ( ! empty( $start_date ) ) {
+			$where_conditions[] = 'metric_date >= %s';
+			$prepare_values[]   = sanitize_text_field( $start_date );
+		}
+
+		if ( ! empty( $end_date ) ) {
+			$where_conditions[] = 'metric_date <= %s';
+			$prepare_values[]   = sanitize_text_field( $end_date );
+		}
+
+		// Build the SQL query.
+		$sql = "SELECT metric_date, cdn_hits, cdn_misses FROM `{$metrics_table}`";
+		if ( ! empty( $where_conditions ) ) {
+			$sql .= ' WHERE ' . implode( ' AND ', $where_conditions );
+		}
+		$sql .= ' ORDER BY metric_date DESC';
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- custom table read
+		if ( ! empty( $prepare_values ) ) {
+			$results = $wpdb->get_results(
+				$wpdb->prepare(
+					$sql, // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- SQL is constructed safely above
+					...$prepare_values
+				)
+			);
+		} else {
+			$results = $wpdb->get_results( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- No user input, table name is safe
+		}
+
+		return $results ? $results : array();
+	}
+
 	/**
 	 * Get database schema version for debugging.
 	 *
@@ -426,5 +531,128 @@ class JTZL_SW_DB {
 	 */
 	public static function get_db_version() {
 		return get_option( 'jtzl_sw_db_version', 0 );
+	}
+
+	/**
+	 * Get comprehensive migration status for debugging.
+	 *
+	 * @since 1.5.0
+	 *
+	 * @return array Migration status information.
+	 */
+	public static function get_migration_status() {
+		$current_plugin_version = JTZL_SW_VERSION;
+		$last_migrated_version  = get_option( 'jtzl_sw_plugin_version', '0.0.0' );
+		$legacy_db_version      = get_option( 'jtzl_sw_db_version', 0 );
+
+		return array(
+			'current_plugin_version' => $current_plugin_version,
+			'last_migrated_version'  => $last_migrated_version,
+			'legacy_db_version'      => $legacy_db_version,
+			'migrations_needed'      => self::get_migrations_between_versions( $last_migrated_version, $current_plugin_version ),
+			'available_migrations'   => self::VERSION_MIGRATIONS,
+			'needs_migration'        => version_compare( $last_migrated_version, $current_plugin_version, '<' ),
+		);
+	}
+
+	/**
+	 * Migration: Create CDN error log table.
+	 *
+	 * Creates the CDN error logging table for tracking CDN failures and diagnostics.
+	 * Introduced in plugin version 1.5.0.
+	 *
+	 * @since 1.5.0
+	 *
+	 * @return bool True if migration successful, false otherwise.
+	 */
+	private static function migrate_create_cdn_error_log_table() {
+		// Create the CDN error log table.
+		JTZL_SW_CDN_Error_Handler::create_error_log_table();
+
+		// Verify table was created successfully.
+		global $wpdb;
+		$table_name   = $wpdb->prefix . 'jtzl_sw_cdn_error_log';
+		$table_exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table_name ) );
+
+		return $table_exists === $table_name;
+	}
+
+	/**
+	 * Migration: Add CDN metrics columns to existing metrics table.
+	 *
+	 * Adds cdn_hits and cdn_misses columns to the metrics table for existing installations.
+	 * This migration is idempotent - it only adds columns if they don't already exist.
+	 * Introduced in plugin version 2.0.0.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return bool True if migration successful, false otherwise.
+	 */
+	private static function migrate_add_cdn_metrics_columns() {
+		global $wpdb;
+
+		$metrics_table = esc_sql( $wpdb->prefix . 'jtzl_sw_cache_metrics' );
+
+		// Check if cdn_hits column already exists using DESCRIBE.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- schema migration check with safe table name
+		$describe_result  = $wpdb->get_results( 'DESCRIBE `' . $metrics_table . '`' );
+		$existing_columns = array();
+		if ( $describe_result ) {
+			foreach ( $describe_result as $column ) {
+				$existing_columns[] = $column->Field;
+			}
+		}
+
+		$cdn_hits_exists   = in_array( 'cdn_hits', $existing_columns, true );
+		$cdn_misses_exists = in_array( 'cdn_misses', $existing_columns, true );
+
+		$columns_to_add = array();
+
+		if ( ! $cdn_hits_exists ) {
+			$columns_to_add[] = 'ADD COLUMN cdn_hits int(11) NOT NULL DEFAULT 0';
+		}
+
+		if ( ! $cdn_misses_exists ) {
+			$columns_to_add[] = 'ADD COLUMN cdn_misses int(11) NOT NULL DEFAULT 0';
+		}
+
+		// If both columns already exist, migration is complete.
+		if ( empty( $columns_to_add ) ) {
+			return true;
+		}
+
+		// Add the missing columns.
+		$alter_sql = 'ALTER TABLE `' . $metrics_table . '` ' . implode( ', ', $columns_to_add );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- schema migration with safe table name
+		$result = $wpdb->query( $alter_sql );
+
+		if ( false === $result ) {
+			error_log( sprintf( 'JTZL SW: Failed to add CDN columns to metrics table. SQL: %s, Error: %s', $alter_sql, $wpdb->last_error ) );
+			return false;
+		}
+
+		// Verify columns were added successfully using DESCRIBE.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- schema migration verification with safe table name
+		$final_describe_result = $wpdb->get_results( 'DESCRIBE `' . $metrics_table . '`' );
+		$final_columns         = array();
+		if ( $final_describe_result ) {
+			foreach ( $final_describe_result as $column ) {
+				$final_columns[] = $column->Field;
+			}
+		}
+
+		$cdn_hits_final   = in_array( 'cdn_hits', $final_columns, true );
+		$cdn_misses_final = in_array( 'cdn_misses', $final_columns, true );
+
+		$success = $cdn_hits_final && $cdn_misses_final;
+
+		if ( $success ) {
+			error_log( 'JTZL SW: Successfully added CDN metrics columns to existing metrics table' );
+		} else {
+			error_log( 'JTZL SW: Failed to verify CDN columns were added to metrics table' );
+		}
+
+		return $success;
 	}
 }

@@ -3,13 +3,13 @@ Contributors: jtzl
 Tags: cache, performance, in-browser-cache, browser cache, client-side cache
 Requires at least: 6.8
 Tested up to: 6.8
-Stable tag: 1.0.0
+Stable tag: 2.0.0
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: in-browser-cache
 
-Improve website performance with in-browser caching using Service Workers, with transparent metrics and zero configuration required.
+Improve website performance with client-side caching using Service Workers, featuring passive and active CDN support, transparent metrics and zero configuration required.
 
 == Description ==
 
@@ -20,14 +20,18 @@ Unlike traditional server-side caching plugins, In-Browser Cache operates entire
 = Key Features =
 
 * **In-Browser Caching**: Leverages Service Workers to cache static assets directly in the browser
+* **Passive CDN Recognition**: Automatically detects and optimizes caching for major CDN providers (Cloudflare, BunnyCDN, Fastly, Amazon CloudFront, and more)
+* **Active CDN Support**: Proactively monitors CDN health and implements fallback strategies when CDN issues are detected
 * **Smart Caching Strategies**: Different strategies for different content types:
   * Cache-first for static assets (JS, CSS, images, fonts)
   * Network-first for HTML content
   * Network-only for API/dynamic routes
+* **Intelligent CDN Detection**: Uses domain patterns, HTTP headers, and heuristics to identify CDN assets without configuration
+* **Proactive CDN Management**: Actively monitors CDN health and implements fallback strategies when CDN issues are detected
 * **Simple Configuration**: One-click enable/disable toggle with sensible defaults
-* **Transparent Metrics**: Track cache hits/misses and bandwidth saved
-* **Visual Dashboard**: See the impact of caching with clear charts and statistics
-* **Zero Configuration**: Works out of the box with sensible defaults
+* **Enhanced Metrics**: Track cache performance separately for CDN vs origin assets
+* **Visual Dashboard**: See the impact of caching with clear charts and statistics including CDN performance
+* **Zero Configuration**: Works out of the box with sensible defaults - CDN detection is automatic
 * **Performance Safeguards**: Automatic cache management and minimal impact on page load
 * **No External Dependencies**: Everything runs on your WordPress site without external services
 * **GDPR Compliance**: Automatic service worker disabling for logged-in users to ensure privacy
@@ -38,10 +42,12 @@ In-Browser Cache uses the Service Worker API to intercept network requests and a
 
 1. **Service Worker Registration**: When a user visits your site, a service worker is registered in their browser
 2. **Request Interception**: The service worker intercepts requests for assets
-3. **Caching Strategy Application**: Different strategies are applied based on content type
-4. **Metrics Collection**: Cache hits, misses, and bandwidth savings are tracked
-5. **Data Synchronization**: Metrics are periodically sent to your WordPress site
-6. **Dashboard Visualization**: Data is processed and displayed in the admin dashboard
+3. **Passive CDN Detection**: Automatically identifies CDN assets using domain patterns (Cloudflare, BunnyCDN, Fastly, CloudFront domains), HTTP headers (cf-ray, bunnycdn-cache-status, x-served-by, x-amz-cf-id), and heuristics (domains containing 'cdn', 'static', 'assets')
+4. **Active CDN Monitoring**: Proactively monitors CDN health and implements fallback strategies when CDN issues are detected
+5. **Caching Strategy Application**: Different strategies are applied based on content type and origin (CDN vs local)
+6. **Metrics Collection**: Cache hits, misses, and bandwidth savings are tracked separately for CDN and origin assets
+7. **Data Synchronization**: Metrics are periodically sent to your WordPress site
+8. **Dashboard Visualization**: Data is processed and displayed in the admin dashboard with CDN vs origin breakdowns
 
 = Benefits =
 
@@ -50,6 +56,7 @@ In-Browser Cache uses the Service Worker API to intercept network requests and a
 * **Improved User Experience**: Faster page loads lead to better user experience
 * **Transparent Metrics**: See exactly how caching is benefiting your site
 * **Complementary to Server-Side Caching**: Works alongside other caching solutions
+* **Enhanced CDN Reliability**: Both passive detection and active monitoring ensure optimal CDN performance
 
 == Installation ==
 
@@ -108,6 +115,22 @@ By default, the plugin disables caching for logged-in users to ensure GDPR compl
 
 When a user logs in, the service worker is automatically unregistered and all cached data is cleared. This ensures no data from the non-authenticated session persists into the authenticated session. The service worker will be re-registered when the user logs out.
 
+= How does CDN detection work? =
+
+The plugin provides comprehensive CDN support through two complementary approaches: 1) **Passive CDN Recognition** - automatically detects CDN assets using domain patterns for popular CDNs like Cloudflare, jsDelivr, unpkg, and others, HTTP response headers such as cf-ray, x-served-by, and server headers, and heuristic analysis of domains containing keywords like 'cdn', 'static', or 'assets'. 2) **Active CDN Support** - proactively monitors CDN health and implements fallback mechanisms for enhanced reliability. No configuration is required - both detection and monitoring work automatically.
+
+= Which CDN providers are supported? =
+
+The plugin provides comprehensive support for the four major CDN providers: **Cloudflare**, **BunnyCDN**, **Fastly**, and **Amazon CloudFront**. These are detected through both domain patterns and HTTP headers for maximum accuracy. Additionally, the plugin recognizes jsDelivr, unpkg, Google Fonts, Bootstrap CDN, and many others. It also uses intelligent heuristics to detect unknown CDNs based on domain patterns. The plugin combines passive detection with active monitoring to work with any CDN while providing enhanced reliability and fallback capabilities.
+
+= Can I see separate metrics for CDN vs origin assets? =
+
+Yes! The dashboard displays separate statistics for CDN and origin assets, including cache hits, misses, and performance metrics. This helps you understand how much your CDN usage is contributing to your site's performance improvements.
+
+= Does CDN caching work with any CDN provider? =
+
+Yes, both the passive CDN detection and active CDN support work with any CDN provider. While the plugin has specific recognition for popular CDNs, it uses intelligent heuristics to detect and cache assets from any CDN, ensuring optimal performance regardless of your CDN choice. The plugin provides both automatic detection and proactive monitoring for enhanced reliability.
+
 = I'm getting a 404 error for /service-worker.js on my Nginx server =
 
 If you're using Nginx and getting a 404 error when trying to access `/service-worker.js`, you need to add a custom Nginx rule to handle this file specially. Add the following to your Nginx server configuration:
@@ -149,25 +172,26 @@ If you need to modify the JavaScript source code, you can rebuild the assets:
 * npm
 
 **Build Commands:**
-```
 # Install dependencies
-npm install
+`npm install`
 
 # Clean and build all assets
-npm run build
+`npm run build`
 
 # Build individual components
-npm run build:admin      # Settings page
-npm run build:dashboard  # Metrics dashboard  
-npm run build:sw         # Service worker
+`npm run build:admin`      # Settings page
+`npm run build:dashboard`  # Metrics dashboard  
+`npm run build:sw`         # Service worker
 
 # Clean build directory
-npm run clean
-```
+`npm run clean`
 
 Built files are output to the `/build/` directory and automatically used by the plugin.
 
 == Changelog ==
+
+= 2.0.0 =
+Added comprehensive CDN support with both passive recognition and active monitoring capabilities.
 
 = 1.0.0 =
 Initial release of In-Browser Cache.

@@ -4,9 +4,11 @@
  * This file handles the dashboard functionality for the In-Browser Cache plugin.
  * It fetches metrics data from the REST API and displays it in charts and tables.
  *
- * @package In-Browser Cache
+ * @package JTZL_Service_Worker
  * @since 0.1.0
  */
+
+import { Chart } from 'chart.js/auto';
 
 jQuery(document).ready(function ($) {
     /** @type {Chart|null} Chart.js instance for the metrics chart */
@@ -86,26 +88,46 @@ jQuery(document).ready(function ($) {
         $('#total-misses').text(data.totals.misses || 0);
         $('#bytes-saved').text(formatBytes(data.totals.bytes_saved || 0));
 
+        // Update CDN summary cards
+        $('#cdn-total-hits').text(data.totals.cdn_hits || 0);
+        $('#cdn-total-misses').text(data.totals.cdn_misses || 0);
+
         // Prepare chart data
         const labels = data.history.map(item => item.metric_date);
-        const hitsData = data.history.map(item => item.hits);
-        const missesData = data.history.map(item => item.misses);
+        const hitsData = data.history.map(item => item.hits || 0);
+        const missesData = data.history.map(item => item.misses || 0);
+        const cdnHitsData = data.history.map(item => item.cdn_hits || 0);
+        const cdnMissesData = data.history.map(item => item.cdn_misses || 0);
 
         const chartData = {
             labels: labels,
             datasets: [
                 {
-                    label: 'Cache Hits',
+                    label: 'Origin Hits',
                     data: hitsData,
                     backgroundColor: 'rgba(54, 162, 235, 0.5)',
                     borderColor: 'rgba(54, 162, 235, 1)',
                     borderWidth: 1
                 },
                 {
-                    label: 'Cache Misses',
+                    label: 'Origin Misses',
                     data: missesData,
                     backgroundColor: 'rgba(255, 99, 132, 0.5)',
                     borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'CDN Hits',
+                    data: cdnHitsData,
+                    backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'CDN Misses',
+                    data: cdnMissesData,
+                    backgroundColor: 'rgba(255, 206, 86, 0.5)',
+                    borderColor: 'rgba(255, 206, 86, 1)',
                     borderWidth: 1
                 }
             ]
@@ -160,11 +182,6 @@ jQuery(document).ready(function ($) {
             const hitCount = parseInt(asset.hit_count) || 0;
             const lastAccessed = asset.last_accessed || '';
 
-            // Format the URL for display (truncate if too long)
-            const displayUrl = assetUrl.length > 60 ? 
-                assetUrl.substring(0, 57) + '...' : 
-                assetUrl;
-
             // Format the last accessed date
             const formattedDate = lastAccessed ? 
                 new Date(lastAccessed).toLocaleString() : 
@@ -172,11 +189,11 @@ jQuery(document).ready(function ($) {
 
             tbody.append(`
                 <tr>
-                    <td title="${assetUrl}">${displayUrl}</td>
-                    <td>${assetType}</td>
-                    <td>${formatBytes(assetSize)}</td>
-                    <td><strong>${formatHitCount(hitCount)} hits</strong></td>
-                    <td>${formattedDate}</td>
+                    <td style="word-wrap: break-word; word-break: break-all; overflow-wrap: break-word; white-space: normal; max-width: none; width: 45%;">${assetUrl}</td>
+                    <td style="width: 10%;">${assetType}</td>
+                    <td style="width: 10%;">${formatBytes(assetSize)}</td>
+                    <td style="width: 15%;"><strong>${formatHitCount(hitCount)} hits</strong></td>
+                    <td style="width: 20%;">${formattedDate}</td>
                 </tr>
             `);
         });

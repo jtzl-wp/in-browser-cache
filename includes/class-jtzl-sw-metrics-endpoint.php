@@ -79,6 +79,16 @@ class JTZL_SW_Metrics_Endpoint {
 				'permission_callback' => array( $this, 'check_nonce_permission' ),
 			)
 		);
+
+		register_rest_route(
+			'jtzl-sw/v1',
+			'/cdn-error',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( $this, 'handle_cdn_error' ),
+				'permission_callback' => array( $this, 'check_permission' ),
+			)
+		);
 	}
 
 	/**
@@ -295,6 +305,8 @@ class JTZL_SW_Metrics_Endpoint {
 		$hits        = isset( $aggregated['hits'] ) ? absint( $aggregated['hits'] ) : 0;
 		$misses      = isset( $aggregated['misses'] ) ? absint( $aggregated['misses'] ) : 0;
 		$bytes_saved = isset( $aggregated['bytesSaved'] ) ? absint( $aggregated['bytesSaved'] ) : 0;
+		$cdn_hits    = isset( $aggregated['cdnHits'] ) ? absint( $aggregated['cdnHits'] ) : 0;
+		$cdn_misses  = isset( $aggregated['cdnMisses'] ) ? absint( $aggregated['cdnMisses'] ) : 0;
 
 		// Process per-asset frequency data.
 		if ( is_array( $assets ) && ! empty( $assets ) ) {
@@ -340,11 +352,21 @@ class JTZL_SW_Metrics_Endpoint {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- custom table aggregation write
 			$result = $wpdb->query(
 				$wpdb->prepare(
-					'INSERT INTO ' . esc_sql( $table_name ) . ' (metric_date, hits, misses, bytes_saved) VALUES (%s, %d, %d, %d) ON DUPLICATE KEY UPDATE hits = hits + VALUES(hits), misses = misses + VALUES(misses), bytes_saved = bytes_saved + VALUES(bytes_saved)',
+					// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					"INSERT INTO `{$table_name}` (metric_date, hits, misses, bytes_saved, cdn_hits, cdn_misses)
+					VALUES (%s, %d, %d, %d, %d, %d)
+					ON DUPLICATE KEY UPDATE
+						hits = hits + VALUES(hits),
+						misses = misses + VALUES(misses),
+						bytes_saved = bytes_saved + VALUES(bytes_saved),
+						cdn_hits = cdn_hits + VALUES(cdn_hits),
+						cdn_misses = cdn_misses + VALUES(cdn_misses)",
 					$metric_date,
 					$hits,
 					$misses,
-					$bytes_saved
+					$bytes_saved,
+					$cdn_hits,
+					$cdn_misses
 				)
 			);
 
@@ -390,67 +412,63 @@ class JTZL_SW_Metrics_Endpoint {
 		global $wpdb;
 
 		$table_name  = $wpdb->prefix . 'jtzl_sw_cache_metrics';
-		$hits        = 0;
-		$misses      = 0;
-		$bytes_saved = 0;
 		$metric_date = current_time( 'Y-m-d' );
 
+		// Initialize counters for both origin and CDN assets.
+		$origin_hits        = 0;
+		$origin_misses      = 0;
+		$origin_bytes_saved = 0;
+		$cdn_hits           = 0;
+		$cdn_misses         = 0;
+
 		foreach ( $params as $log ) {
-			// Validate that $log is an array to prevent warnings.
 			if ( ! is_array( $log ) ) {
-				continue; // Skip malformed entries.
+				continue;
 			}
 
-			$hit = ! empty( $log['hit'] );
-			// Handle size more carefully - distinguish between 0, null, and missing.
-			$raw_size = isset( $log['size'] ) ? $log['size'] : null;
-			$size     = null;
+			$hit    = ! empty( $log['hit'] );
+			$size   = isset( $log['size'] ) && is_numeric( $log['size'] ) ? absint( $log['size'] ) : 0;
+			$source = isset( $log['source'] ) && 'cdn' === $log['source'] ? 'cdn' : 'origin';
+			$url    = isset( $log['resourceURL'] ) ? esc_url_raw( $log['resourceURL'] ) : '';
 
-			if ( null !== $raw_size ) {
-				if ( is_numeric( $raw_size ) ) {
-					$size = absint( $raw_size );
-				} else {
-					// Non-numeric size received.
-					$size = 0;
-				}
+			if ( 'cdn' === $source ) {
+				$cdn_hits   += $hit ? 1 : 0;
+				$cdn_misses += $hit ? 0 : 1;
+				// Skip CDN bytes saved - unreliable due to CORS restrictions.
 			} else {
-				// No size data received for URL.
-				$size = 0; // Default to 0 for database consistency.
+				$origin_hits        += $hit ? 1 : 0;
+				$origin_misses      += $hit ? 0 : 1;
+				$origin_bytes_saved += $hit ? $size : 0;
 			}
-
-			$type      = isset( $log['type'] ) ? sanitize_text_field( $log['type'] ) : '';
-			$url       = isset( $log['resourceURL'] ) ? esc_url_raw( $log['resourceURL'] ) : '';
-			$timestamp = isset( $log['timestamp'] ) ? sanitize_text_field( $log['timestamp'] ) : '';
-
-			$hits        += $hit ? 1 : 0;
-			$misses      += $hit ? 0 : 1;
-			$bytes_saved += $hit ? $size : 0;
 
 			if ( $hit && $url ) {
-				// Always use UTC for last_accessed. If timestamp is missing or invalid, use current UTC time.
-				$ts = $timestamp ? strtotime( $timestamp ) : false;
-				if ( false === $ts ) {
-					$last_accessed = gmdate( 'Y-m-d H:i:s' );
-				} else {
-					$last_accessed = gmdate( 'Y-m-d H:i:s', $ts );
-				}
-
-				// Use the database method to handle hit count tracking.
-				$upsert_result = JTZL_SW_DB::upsert_asset_hit_count( $url, $type, $size, $last_accessed );
+				$type          = isset( $log['type'] ) ? sanitize_text_field( $log['type'] ) : '';
+				$timestamp     = isset( $log['timestamp'] ) ? sanitize_text_field( $log['timestamp'] ) : '';
+				$ts            = $timestamp ? strtotime( $timestamp ) : false;
+				$last_accessed = ( false === $ts ) ? gmdate( 'Y-m-d H:i:s' ) : gmdate( 'Y-m-d H:i:s', $ts );
+				JTZL_SW_DB::upsert_asset_hit_count( $url, $type, $size, $last_accessed );
 			}
 		}
 
 		// Update aggregated metrics in the main metrics table.
 		try {
-			// Attempting to insert or update record.
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- custom table aggregation write
 			$result = $wpdb->query(
 				$wpdb->prepare(
-					'INSERT INTO ' . esc_sql( $table_name ) . ' (metric_date, hits, misses, bytes_saved) VALUES (%s, %d, %d, %d) ON DUPLICATE KEY UPDATE hits = hits + VALUES(hits), misses = misses + VALUES(misses), bytes_saved = bytes_saved + VALUES(bytes_saved)',
+					// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					"INSERT INTO `{$table_name}` (metric_date, hits, misses, bytes_saved, cdn_hits, cdn_misses)
+					VALUES (%s, %d, %d, %d, %d, %d)
+					ON DUPLICATE KEY UPDATE
+						hits = hits + VALUES(hits),
+						misses = misses + VALUES(misses),
+						bytes_saved = bytes_saved + VALUES(bytes_saved),
+						cdn_hits = cdn_hits + VALUES(cdn_hits),
+						cdn_misses = cdn_misses + VALUES(cdn_misses)",
 					$metric_date,
-					$hits,
-					$misses,
-					$bytes_saved
+					$origin_hits,
+					$origin_misses,
+					$origin_bytes_saved,
+					$cdn_hits,
+					$cdn_misses
 				)
 			);
 
@@ -504,7 +522,7 @@ class JTZL_SW_Metrics_Endpoint {
 		$totals = wp_cache_get( 'dashboard_totals', 'jtzl_sw' );
 		if ( false === $totals ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery -- computed aggregate read
-			$totals = $wpdb->get_row( "SELECT SUM(hits) as hits, SUM(misses) as misses, SUM(bytes_saved) as bytes_saved FROM {$wpdb->prefix}jtzl_sw_cache_metrics" );
+			$totals = $wpdb->get_row( "SELECT SUM(hits) as hits, SUM(misses) as misses, SUM(bytes_saved) as bytes_saved, SUM(cdn_hits) as cdn_hits, SUM(cdn_misses) as cdn_misses FROM {$wpdb->prefix}jtzl_sw_cache_metrics" );
 			wp_cache_set( 'dashboard_totals', $totals, 'jtzl_sw', 60 );
 		}
 
@@ -549,5 +567,134 @@ class JTZL_SW_Metrics_Endpoint {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Handles CDN error logging from the service worker.
+	 *
+	 * @since 2.0.0
+	 * @param WP_REST_Request $request The REST API request object.
+	 * @return WP_REST_Response The response object containing success status.
+	 */
+	public function handle_cdn_error( WP_REST_Request $request ) {
+		$params = $request->get_json_params();
+
+		if ( ! is_array( $params ) ) {
+			return new WP_REST_Response(
+				array(
+					'success' => false,
+					'message' => 'Invalid payload: expected array',
+				),
+				400
+			);
+		}
+
+		// Extract and sanitize error data.
+		$url          = isset( $params['url'] ) ? esc_url_raw( $params['url'] ) : '';
+		$event_type   = isset( $params['event_type'] ) ? sanitize_text_field( $params['event_type'] ) : 'unknown';
+		$details      = isset( $params['details'] ) && is_array( $params['details'] ) ? $params['details'] : array();
+		$timestamp    = isset( $params['timestamp'] ) ? sanitize_text_field( $params['timestamp'] ) : '';
+		$user_agent   = isset( $params['user_agent'] ) ? sanitize_text_field( $params['user_agent'] ) : '';
+		$cdn_base_url = isset( $params['cdn_base_url'] ) ? esc_url_raw( $params['cdn_base_url'] ) : '';
+
+		if ( empty( $url ) ) {
+			return new WP_REST_Response(
+				array(
+					'success' => false,
+					'message' => 'URL is required',
+				),
+				400
+			);
+		}
+
+		// Map service worker event types to PHP error types.
+		$error_type_mapping = array(
+			'fetch_failed'      => JTZL_SW_CDN_Error_Handler::ERROR_TYPES['CONNECTIVITY'],
+			'handler_error'     => JTZL_SW_CDN_Error_Handler::ERROR_TYPES['UNKNOWN'],
+			'bypass_activated'  => JTZL_SW_CDN_Error_Handler::ERROR_TYPES['CONNECTIVITY'],
+			'fallback_failed'   => JTZL_SW_CDN_Error_Handler::ERROR_TYPES['HTTP_ERROR'],
+			'conversion_failed' => JTZL_SW_CDN_Error_Handler::ERROR_TYPES['CONFIGURATION'],
+			'fallback_error'    => JTZL_SW_CDN_Error_Handler::ERROR_TYPES['CONNECTIVITY'],
+			'cache_fallback'    => JTZL_SW_CDN_Error_Handler::ERROR_TYPES['CONNECTIVITY'],
+			'cache_error'       => JTZL_SW_CDN_Error_Handler::ERROR_TYPES['UNKNOWN'],
+		);
+
+		$error_type = isset( $error_type_mapping[ $event_type ] ) ?
+			$error_type_mapping[ $event_type ] :
+			JTZL_SW_CDN_Error_Handler::ERROR_TYPES['UNKNOWN'];
+
+		// Determine severity from details.
+		$severity = JTZL_SW_CDN_Error_Handler::SEVERITY_LEVELS['ERROR'];
+		if ( isset( $details['severity'] ) ) {
+			$valid_severities = array( 'critical', 'error', 'warning', 'info' );
+			if ( in_array( $details['severity'], $valid_severities, true ) ) {
+				$severity = $details['severity'];
+			}
+		}
+
+		// Create error message.
+		$error_message = sprintf( 'CDN error from service worker: %s', $event_type );
+		if ( isset( $details['error'] ) ) {
+			$error_message .= ' - ' . sanitize_text_field( $details['error'] );
+		}
+
+		// Prepare context data (filter sensitive information).
+		$context = array(
+			'service_worker_event' => $event_type,
+			'cdn_url'              => $url,
+			'cdn_base_url'         => $cdn_base_url,
+			'timestamp'            => $timestamp,
+			'user_agent_type'      => $this->get_user_agent_type( $user_agent ),
+		);
+
+		// Add safe details.
+		if ( isset( $details['error_type'] ) ) {
+			$context['error_type'] = sanitize_text_field( $details['error_type'] );
+		}
+		if ( isset( $details['response_code'] ) ) {
+			$context['response_code'] = absint( $details['response_code'] );
+		}
+
+		// Log the CDN error.
+		JTZL_SW_CDN_Error_Handler::log_cdn_error(
+			$error_type,
+			$error_message,
+			$context,
+			$severity
+		);
+
+		return new WP_REST_Response(
+			array(
+				'success' => true,
+				'message' => 'CDN error logged successfully',
+			),
+			200
+		);
+	}
+
+	/**
+	 * Get a safe user agent type for logging (no PII).
+	 *
+	 * @since 2.0.0
+	 * @param string $user_agent Full user agent string.
+	 * @return string Safe user agent type.
+	 */
+	private function get_user_agent_type( $user_agent ) {
+		if ( empty( $user_agent ) ) {
+			return 'unknown';
+		}
+
+		// Extract browser type only (no version numbers or detailed info).
+		if ( strpos( $user_agent, 'Chrome' ) !== false ) {
+			return 'chrome';
+		} elseif ( strpos( $user_agent, 'Firefox' ) !== false ) {
+			return 'firefox';
+		} elseif ( strpos( $user_agent, 'Safari' ) !== false ) {
+			return 'safari';
+		} elseif ( strpos( $user_agent, 'Edge' ) !== false ) {
+			return 'edge';
+		} else {
+			return 'other';
+		}
 	}
 }

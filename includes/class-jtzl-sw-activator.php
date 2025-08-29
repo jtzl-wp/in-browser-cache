@@ -33,8 +33,15 @@ class JTZL_SW_Activator {
 	 * @since 0.1.0
 	 */
 	public static function activate() {
-		// Create the custom table for metrics.
-		JTZL_SW_DB::create_table();
+		// Check if build artifacts exist.
+		$build_path = plugin_dir_path( __DIR__ ) . 'build/service-worker.js';
+		if ( ! file_exists( $build_path ) ) {
+			// Store a notice for admin users about missing build artifacts.
+			set_transient( 'jtzl_sw_build_missing_notice', true, DAY_IN_SECONDS );
+		}
+
+		// Create the custom table for metrics and run any pending migrations.
+		JTZL_SW_DB::ensure_table_exists();
 
 		// Clear any deactivation flags from previous deactivation.
 		delete_transient( 'jtzl_sw_deactivated' );
@@ -43,6 +50,9 @@ class JTZL_SW_Activator {
 		// Ensure our rewrite rule is added before flushing.
 		$file_handler = new JTZL_SW_File_Handler();
 		$file_handler->add_rewrite_rule();
+
+		// Schedule automatic cleanup of CDN error logs.
+		JTZL_SW_CDN_Error_Handler::schedule_cleanup();
 
 		// Flush the rewrite rules to make the new rule active.
 		flush_rewrite_rules();
@@ -71,6 +81,9 @@ class JTZL_SW_Activator {
 
 		// Clear any cached service worker files from object cache.
 		wp_cache_delete( 'jtzl_sw_service_worker_content' );
+
+		// Unschedule automatic cleanup of CDN error logs.
+		JTZL_SW_CDN_Error_Handler::unschedule_cleanup();
 
 		// Note: We cannot unregister the service worker here because:
 		// 1. We're in PHP context, not JavaScript

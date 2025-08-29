@@ -88,12 +88,14 @@ class JTZL_SW_File_Handler {
 		}
 
 		if ( get_query_var( 'jtzl_sw_serve_sw' ) ) {
+			// Always use the bundled service worker to avoid ES module import issues.
 			$sw_template_path = plugin_dir_path( __DIR__ ) . 'build/service-worker.js';
 
 			if ( ! file_exists( $sw_template_path ) ) {
-				// Log template file missing error.
-				error_log( 'JTZL Service Worker: Template file missing at ' . $sw_template_path );
+				// Return 404 to prevent service worker registration when build is missing.
 				status_header( 404 );
+				header( 'Content-Type: text/plain; charset=utf-8' );
+				echo 'Service Worker build not found. Please run "npm run build" to generate the bundled service worker.';
 				exit;
 			}
 
@@ -110,6 +112,12 @@ class JTZL_SW_File_Handler {
 			// Generate dynamic WordPress URLs using proper WordPress functions.
 			$ajax_url    = admin_url( 'admin-ajax.php' );
 			$wp_json_url = rest_url( 'wp/v2/' );
+
+			// CDN configuration.
+			$cdn_settings         = JTZL_SW_CDN_Config::get_cdn_settings();
+			$cdn_enabled          = $cdn_settings['cdn_enabled'] ? 'true' : 'false';
+			$cdn_base_url         = $cdn_settings['cdn_base_url'];
+			$cdn_fallback_enabled = $cdn_settings['cdn_fallback_enabled'] ? 'true' : 'false';
 
 			// Performance intervals (convert minutes to milliseconds).
 			$cache_version_interval = isset( $options['cache_version_check_interval'] ) ? (int) $options['cache_version_check_interval'] : 3;
@@ -132,12 +140,30 @@ class JTZL_SW_File_Handler {
 				'%%CACHE_VERSION_INTERVAL%%',
 				'%%METRICS_SYNC_INTERVAL%%',
 				'%%HEALTH_CHECK_INTERVAL%%',
+				'%%CDN_ENABLED%%',
+				'%%CDN_BASE_URL%%',
+				'%%CDN_FALLBACK_ENABLED%%',
 				'%%AJAX_URL%%',
 				'%%WP_JSON_URL%%',
 			);
 
 			$content = str_replace(
-				$required_placeholders,
+				array(
+					'%%MAX_CACHE_LIFETIME%%',
+					'%%MAX_CACHE_SIZE%%',
+					'%%REST_URL%%',
+					'%%REST_NONCE%%',
+					'%%NONCE_URL%%',
+					'%%CACHE_VERSION_URL%%',
+					'%%CACHE_VERSION_INTERVAL%%',
+					'%%METRICS_SYNC_INTERVAL%%',
+					'%%HEALTH_CHECK_INTERVAL%%',
+					'%%CDN_ENABLED%%',
+					'%%CDN_BASE_URL%%',
+					'%%CDN_FALLBACK_ENABLED%%',
+					'%%AJAX_URL%%',
+					'%%WP_JSON_URL%%',
+				),
 				array(
 					(int) $max_cache_lifetime,           // Integer values are safe.
 					(int) $max_cache_size,               // Integer values are safe.
@@ -148,6 +174,9 @@ class JTZL_SW_File_Handler {
 					(int) ( $cache_version_interval * 60 * 1000 ), // Integer calculation is safe.
 					(int) ( $metrics_sync_interval * 60 * 1000 ),  // Integer calculation is safe.
 					(int) ( $health_check_interval * 60 * 1000 ),  // Integer calculation is safe.
+					$cdn_enabled,
+					$cdn_base_url,
+					$cdn_fallback_enabled,
 					addslashes( esc_url_raw( $ajax_url ) ),                 // URL validated and escaped for single-quoted JS strings.
 					addslashes( esc_url_raw( $wp_json_url ) ),              // URL validated and escaped for single-quoted JS strings.
 				),

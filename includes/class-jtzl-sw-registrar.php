@@ -66,6 +66,7 @@ class JTZL_SW_Registrar {
 			array(
 				'isUserLoggedIn'        => $is_user_logged_in,
 				'disableForLoggedUsers' => $disable_for_logged_users,
+				'enableCDNCaching'      => true, // CDN caching always enabled.
 				'swUrl'                 => esc_url( add_query_arg( 'ver', JTZL_SW_VERSION, '/service-worker.js' ) ),
 				'ajaxUrl'               => esc_url( admin_url( 'admin-ajax.php' ) ),
 				'wpJsonUrl'             => esc_url( rest_url( 'wp/v2/' ) ),

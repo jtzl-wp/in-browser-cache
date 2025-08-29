@@ -5,7 +5,7 @@
  * This file is executed when the plugin is deleted (not just deactivated).
  * It performs complete cleanup of all plugin data.
  *
- * @package In-Browser Cache
+ * @package JTZL_Service_Worker
  * @since 0.2.4
  */
 

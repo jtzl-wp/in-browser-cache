@@ -1,3 +1,8 @@
+// Import CDN detection functions using ES6 modules
+import { detectCDNProvider, getRequestSource, getCDNProvider } from './cdn-detection';
+import { createCDNFallbackPlugin, CDNUrlUtils } from './cdn-fallback';
+
+// Import Workbox and IDB from CDN with error handling
 import { openDB } from 'idb';
 import { ExpirationPlugin } from 'workbox-expiration';
 import { registerRoute, setDefaultHandler } from 'workbox-routing';
@@ -11,6 +16,11 @@ const cacheVersionUrl = '%%CACHE_VERSION_URL%%';
 let restNonce = '%%REST_NONCE%%';
 let currentCacheVersion = null;
 
+// CDN Configuration - simplified for passive detection + fallback
+const cdnEnabled = '%%CDN_ENABLED%%' === 'true';
+const cdnBaseUrl = '%%CDN_BASE_URL%%';
+const cdnFallbackEnabled = '%%CDN_FALLBACK_ENABLED%%' === 'true';
+
 // Dynamic WordPress URLs - replaced at runtime
 const ajaxUrl = '%%AJAX_URL%%';
 const wpJsonUrl = '%%WP_JSON_URL%%';
@@ -19,6 +29,7 @@ const wpJsonUrl = '%%WP_JSON_URL%%';
 const cacheVersionCheckInterval = parseInt('%%CACHE_VERSION_INTERVAL%%', 10);
 const metricsSyncInterval = parseInt('%%METRICS_SYNC_INTERVAL%%', 10);
 const healthCheckInterval = parseInt('%%HEALTH_CHECK_INTERVAL%%', 10);
+
 // Open the IndexedDB database with error handling
 let dbPromise = null;
 let metricsEnabled = false;
@@ -27,7 +38,6 @@ let metricsEnabled = false;
 let metricsInterval = null;
 let healthInterval = null;
 let cacheVersionInterval = null;
-
 try {
   dbPromise = openDB('jtzl-sw-metrics', 1, {
     upgrade(db) {
@@ -48,11 +58,13 @@ const metricsPlugin = {
     // It's a cache miss, log it
     if (response) {
       const size = await calculateResponseSize(response.clone());
+      const source = getRequestSource(new URL(request.url), response);
       logRequest({
         resourceURL: request.url,
         hit: false,
         size: size,
         type: request.destination,
+        source: source,
         timestamp: new Date().toISOString()
       }, 'miss');
     }
@@ -62,11 +74,13 @@ const metricsPlugin = {
     // Only log if we actually have a cached response
     if (cachedResponse) {
       const size = await calculateResponseSize(cachedResponse.clone());
+      const source = getRequestSource(new URL(request.url), cachedResponse);
       logRequest({
         resourceURL: request.url,
         hit: true,
         size: size,
         type: request.destination,
+        source: source,
         timestamp: new Date().toISOString()
       }, 'hit');
     }
@@ -148,6 +162,11 @@ async function enforceMaxCacheSize(cacheName) {
 // Enhanced function to calculate response size with multiple fallback methods
 async function calculateResponseSize(response) {
   try {
+    // Validate response object
+    if (!response || !response.headers) {
+      return 0;
+    }
+    
     // Method 1: Try to get content-length header first
     const contentLength = response.headers.get('content-length');
     if (contentLength && contentLength !== '0') {
@@ -215,6 +234,11 @@ async function calculateResponseSize(response) {
 // Fallback function to estimate size based on URL and content type
 function estimateSizeFromURL(url, contentType) {
   try {
+    // Validate URL before attempting to construct URL object
+    if (!url || typeof url !== 'string' || url.trim() === '') {
+      return 0;
+    }
+    
     const urlObj = new URL(url);
     const pathname = urlObj.pathname.toLowerCase();
 
@@ -256,7 +280,10 @@ function estimateSizeFromURL(url, contentType) {
 
     return 0; // Unknown type
   } catch (error) {
-    console.warn('[SW] Error estimating size from URL:', error);
+    // Only log if it's not a common invalid URL issue
+    if (!(error instanceof TypeError && error.message.includes('Invalid URL'))) {
+      console.warn('[SW] Error estimating size from URL:', error);
+    }
     return 0;
   }
 }
@@ -280,6 +307,55 @@ async function logRequest(data, type) {
       metricsEnabled = false;
     }
   }
+}
+
+// CDN Error logging function to send errors to server
+async function logCDNError(url, eventType, details) {
+  if (!cdnEnabled || !restUrl) {
+    return;
+  }
+
+  try {
+    // Prepare error data for server logging
+    const errorData = {
+      url: url,
+      event_type: eventType,
+      details: details,
+      timestamp: new Date().toISOString(),
+      user_agent: navigator.userAgent,
+      cdn_base_url: cdnBaseUrl
+    };
+
+    // Send to server via REST API
+    const response = await fetch(restUrl.replace('/metrics', '/cdn-error'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-WP-Nonce': restNonce,
+      },
+      body: JSON.stringify(errorData)
+    });
+
+    if (!response.ok) {
+      console.warn('[SW] Failed to log CDN error to server:', response.status);
+    }
+  } catch (error) {
+    console.error('[SW] Error logging CDN error:', error);
+  }
+}
+
+// Create CDN fallback plugin with server logging
+let cdnFallbackPlugin = null;
+if (cdnEnabled && cdnBaseUrl) {
+  cdnFallbackPlugin = createCDNFallbackPlugin({
+    cdnEnabled: cdnEnabled,
+    cdnBaseUrl: cdnBaseUrl,
+    siteOrigin: self.location.origin,
+    logEvent: logCDNError, // Connect to server logging
+    maxConsecutiveFailures: 3,
+    bypassDuration: 5 * 60 * 1000, // 5 minutes
+    cleanupInterval: 10 * 60 * 1000 // 10 minutes
+  });
 }
 
 // Network-only strategy for API/dynamic routes - MUST BE FIRST to prevent caching
@@ -348,7 +424,7 @@ registerRoute(
   })
 );
 
-// CacheFirst strategy for static assets with MB-based size management
+// CacheFirst strategy for static assets with CDN fallback and MB-based size management
 registerRoute(
   ({ request }) => {
     const isStaticAsset = request.destination === 'style' ||
@@ -367,17 +443,39 @@ registerRoute(
       }),
       cacheSizePlugin, // Custom MB-based size management
       metricsPlugin,
+      // Add CDN fallback plugin if CDN is enabled
+      ...(cdnFallbackPlugin ? [cdnFallbackPlugin] : []),
       {
         requestWillFetch: async ({ request }) => {
           return request;
         },
         fetchDidFail: async ({ originalRequest, error }) => {
           console.error(`[SW] CacheFirst: Fetch failed for ${originalRequest.url}:`, error);
+          
+          // Log CDN errors if this is a CDN request
+          if (cdnEnabled && cdnBaseUrl && originalRequest.url.includes(cdnBaseUrl)) {
+            await logCDNError(originalRequest.url, 'fetch_failed', {
+              error: error.message || error.toString(),
+              error_type: 'connectivity',
+              severity: 'error'
+            });
+          }
+          
           // Don't return a response here - let Workbox handle it
           return null;
         },
         handlerDidError: async ({ request, error }) => {
           console.error(`[SW] CacheFirst: Handler error for ${request.url}:`, error);
+          
+          // Log CDN errors if this is a CDN request
+          if (cdnEnabled && cdnBaseUrl && request.url.includes(cdnBaseUrl)) {
+            await logCDNError(request.url, 'handler_error', {
+              error: error.message || error.toString(),
+              error_type: 'unknown',
+              severity: 'error'
+            });
+          }
+          
           // For critical assets, try to fetch from network as fallback
           try {
             return await fetch(request);

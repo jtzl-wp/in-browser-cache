@@ -2,7 +2,7 @@
 # This file is distributed under the same license as the In-Browser Cache package.
 msgid ""
 msgstr ""
-"Project-Id-Version: In-Browser Cache 1.0.0-rc.3\n"
+"Project-Id-Version: In-Browser Cache 2.0.0\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/in-browser-cache\n"
 "POT-Creation-Date: 2025-08-07 17:00+0900\n"
 "MIME-Version: 1.0\n"
