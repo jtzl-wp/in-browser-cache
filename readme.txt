@@ -62,7 +62,7 @@ In-Browser Cache uses the Service Worker API to intercept network requests and a
 
 1. Upload the plugin files to the `/wp-content/plugins/in-browser-cache` directory, or install the plugin through the WordPress plugins screen directly.
 2. Activate the plugin through the 'Plugins' screen in WordPress
-3. Use the In-Browser Cache > Settings screen to configure the plugin
+3. Use the In-Browser Cache > Settings screen to enable and configure the plugin
 4. (Optional) Visit the In-Browser Cache > Dashboard to view caching metrics
 
 == Frequently Asked Questions ==
@@ -136,7 +136,6 @@ Yes, both the passive CDN detection and active CDN support work with any CDN pro
 If you're using Nginx and getting a 404 error when trying to access `/service-worker.js`, you need to add a custom Nginx rule to handle this file specially. Add the following to your Nginx server configuration:
 
 `
-# Handle service-worker.js specially - pass to WordPress
 location = /service-worker.js {
     try_files $uri /index.php$is_args$args;
 }
