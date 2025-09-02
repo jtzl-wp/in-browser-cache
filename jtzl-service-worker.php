@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       In-Browser Cache
  * Description:       An advanced caching plugin using the power of Service Workers.
- * Version:           2.0.0
+ * Version:           2.0.1
  * Requires at least: 6.8
  * Requires PHP:      8.1
  * Author:            JT G.
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'JTZL_SW_VERSION', '2.0.0' );
+define( 'JTZL_SW_VERSION', '2.0.1' );
 
 require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-registrar.php';
 require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-admin.php';
