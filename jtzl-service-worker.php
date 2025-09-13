@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       In-Browser Cache
  * Description:       An advanced caching plugin using the power of Service Workers.
- * Version:           2.0.1
+ * Version:           2.0.2
  * Requires at least: 6.8
  * Requires PHP:      8.1
  * Author:            JT G.
@@ -16,20 +16,25 @@
 
 // Exit if accessed directly.
 if ( ! defined( 'ABSPATH' ) ) {
-	exit;
+	exit();
 }
 
-define( 'JTZL_SW_VERSION', '2.0.1' );
+define( 'JTZL_SW_VERSION', '2.0.2' );
 
 require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-registrar.php';
 require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-admin.php';
-require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-metrics-endpoint.php';
-require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-file-handler.php';
+require_once plugin_dir_path( __FILE__ ) .
+	'includes/class-jtzl-sw-metrics-endpoint.php';
+require_once plugin_dir_path( __FILE__ ) .
+	'includes/class-jtzl-sw-file-handler.php';
 require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-activator.php';
 require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-db.php';
-require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-cdn-config.php';
-require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-url-rewriter.php';
-require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-cdn-error-handler.php';
+require_once plugin_dir_path( __FILE__ ) .
+	'includes/class-jtzl-sw-cdn-config.php';
+require_once plugin_dir_path( __FILE__ ) .
+	'includes/class-jtzl-sw-url-rewriter.php';
+require_once plugin_dir_path( __FILE__ ) .
+	'includes/class-jtzl-sw-cdn-error-handler.php';
 
 register_activation_hook( __FILE__, array( 'JTZL_SW_Activator', 'activate' ) );
 register_deactivation_hook( __FILE__, array( 'JTZL_SW_Activator', 'deactivate' ) );
@@ -48,4 +53,10 @@ new JTZL_SW_Metrics_Endpoint();
 new JTZL_SW_File_Handler();
 
 // Add cleanup hook for CDN error logs.
-add_action( 'jtzl_sw_cleanup_error_logs', array( 'JTZL_SW_CDN_Error_Handler', 'cleanup_old_logs' ) );
+add_action(
+	'jtzl_sw_cleanup_error_logs',
+	array(
+		'JTZL_SW_CDN_Error_Handler',
+		'cleanup_old_logs',
+	)
+);

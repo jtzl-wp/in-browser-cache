@@ -1,9 +1,9 @@
 === In-Browser Cache ===
-Contributors: jtzl
+Contributors: jtzl, yoren
 Tags: cache, performance, in-browser-cache, browser cache, client-side cache, cdn
 Requires at least: 6.8
 Tested up to: 6.8
-Stable tag: 2.0.1
+Stable tag: 2.0.2
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -179,7 +179,7 @@ If you need to modify the JavaScript source code, you can rebuild the assets:
 
 # Build individual components
 `npm run build:admin`      # Settings page
-`npm run build:dashboard`  # Metrics dashboard  
+`npm run build:dashboard`  # Metrics dashboard
 `npm run build:sw`         # Service worker
 
 # Clean build directory
