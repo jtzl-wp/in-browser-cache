@@ -1,6 +1,6 @@
 {
   "name": "jtzl-service-worker-assets",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "In-Browser Cache plugin assets - JavaScript build system for client-side caching functionality",
   "private": true,
   "scripts": {

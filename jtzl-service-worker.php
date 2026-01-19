@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       In-Browser Cache
  * Description:       An advanced caching plugin using the power of Service Workers.
- * Version:           2.0.2
+ * Version:           2.0.3
  * Requires at least: 6.8
  * Requires PHP:      8.1
  * Author:            JT G.
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit();
 }
 
-define( 'JTZL_SW_VERSION', '2.0.2' );
+define( 'JTZL_SW_VERSION', '2.0.3' );
 
 require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-registrar.php';
 require_once plugin_dir_path( __FILE__ ) . 'includes/class-jtzl-sw-admin.php';
@@ -38,6 +38,23 @@ require_once plugin_dir_path( __FILE__ ) .
 
 register_activation_hook( __FILE__, array( 'JTZL_SW_Activator', 'activate' ) );
 register_deactivation_hook( __FILE__, array( 'JTZL_SW_Activator', 'deactivate' ) );
+
+// Flush rewrite rules after activation (deferred for reliability).
+// This runs on the next page load after plugin activation.
+// Using 'init' hook instead of 'admin_init' for better reliability (including WP-CLI).
+add_action(
+	'init',
+	function () {
+		if ( get_transient( 'jtzl_sw_flush_rewrite_rules' ) && current_user_can( 'activate_plugins' ) ) {
+			// Register the rewrite rule before flushing to ensure it's applied.
+			$file_handler = new JTZL_SW_File_Handler();
+			$file_handler->add_rewrite_rule();
+
+			delete_transient( 'jtzl_sw_flush_rewrite_rules' );
+			flush_rewrite_rules();
+		}
+	}
+);
 
 // Ensure tables exist on plugin initialization.
 add_action(

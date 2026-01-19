@@ -47,15 +47,15 @@ class JTZL_SW_Activator {
 		delete_transient( 'jtzl_sw_deactivated' );
 		delete_option( 'jtzl_sw_deactivated_at' );
 
-		// Ensure our rewrite rule is added before flushing.
-		$file_handler = new JTZL_SW_File_Handler();
-		$file_handler->add_rewrite_rule();
-
 		// Schedule automatic cleanup of CDN error logs.
 		JTZL_SW_CDN_Error_Handler::schedule_cleanup();
 
-		// Flush the rewrite rules to make the new rule active.
-		flush_rewrite_rules();
+		// Set a flag to flush rewrite rules on the next page load.
+		// This is more reliable than flushing during activation because WordPress
+		// regenerates rewrite rules by triggering init hooks, which may not have
+		// fully run during the activation context.
+		// No expiration - ensures rules are always flushed regardless of when admin visits.
+		set_transient( 'jtzl_sw_flush_rewrite_rules', true );
 	}
 
 	/**
