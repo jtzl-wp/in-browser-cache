@@ -1,6 +1,6 @@
 === In-Browser Cache ===
 Contributors: jtzl, yoren
-Tags: cache, performance, in-browser-cache, browser cache, client-side cache, cdn
+Tags: performance, in-browser-cache, browser cache, client-side cache, cdn
 Requires at least: 6.8
 Tested up to: 6.9
 Stable tag: 2.0.3
@@ -9,7 +9,7 @@ License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: in-browser-cache
 
-Improve website performance with client-side caching using Service Workers, featuring passive and active CDN support, transparent metrics and zero configuration required.
+Boosts performance with client-side caching via Service Workers. Features CDN support, transparent metrics, and requires zero configuration.
 
 == Description ==
 

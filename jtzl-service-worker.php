@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       In-Browser Cache
- * Description:       An advanced caching plugin using the power of Service Workers.
+ * Description:       Boosts performance with client-side caching via Service Workers. Features CDN support, transparent metrics, and requires zero configuration.
  * Version:           2.0.3
  * Requires at least: 6.8
  * Requires PHP:      8.1
