@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name:       In-Browser Cache
+ * Plugin Name:       JTZL's In-Browser Cache
  * Description:       Boosts performance with client-side caching via Service Workers. Features CDN support, transparent metrics, and requires zero configuration.
  * Version:           2.0.3
  * Requires at least: 6.8
